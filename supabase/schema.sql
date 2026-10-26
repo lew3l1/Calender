@@ -115,6 +115,11 @@ with check ((select auth.uid()) = user_id);
 create policy "Users can delete their own push subscriptions" on public.push_subscriptions
 for delete to authenticated using ((select auth.uid()) = user_id);
 
+-- Make table privileges explicit; RLS still determines which rows can be accessed.
+revoke all on table public.events, public.tasks, public.push_subscriptions from anon;
+grant select, insert, update, delete on table public.events, public.tasks, public.push_subscriptions to authenticated;
+grant all on table public.events, public.tasks, public.push_subscriptions to service_role;
+
 -- Do not enable anonymous table access. The service-role key belongs only in trusted server functions.
 
 
