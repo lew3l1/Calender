@@ -26,7 +26,8 @@
 4. В Authentication → URL Configuration задайте Site URL и добавьте в Redirect URLs адрес локального приложения и адрес опубликованного сайта.
 5. В Authentication → Providers включите Google. Создайте OAuth Client в Google Cloud Console и добавьте Client ID/Secret в настройки Google-провайдера Supabase. Redirect URI берите из панели Supabase, а не придумывайте вручную.
 6. В Authentication → Email настройте подтверждение email. Для реального запуска настройте SMTP-провайдера, отправителя и шаблоны подтверждения/восстановления. Проверьте, что redirect URL для восстановления ведёт на URL приложения.
-7. Перезапустите npm run dev после изменения .env.local. Демо-данные из браузера в Supabase автоматически не переносятся.
+7. В `supabase/templates/confirm_signup.html` и `supabase/templates/recovery.html` лежат готовые русскоязычные HTML-шаблоны. Для оформления писем откройте Authentication → Email Templates в Supabase, выберите Confirm signup и Reset Password, вставьте содержимое соответствующего файла и задайте тему письма. Google-вход обычно не требует отдельного подтверждения через шаблон Supabase: объяснение первого входа встроено в экран Calender.
+8. Перезапустите npm run dev после изменения .env.local. Демо-данные из браузера в Supabase автоматически не переносятся.
 
 ### Параметры
 
