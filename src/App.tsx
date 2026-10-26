@@ -436,8 +436,12 @@ function EventModal({
               <label className="photo-upload-button"><ImagePlus size={16} /> Добавить фото<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(e) => {
                 const incoming = Array.from(e.target.files || []);
                 const valid = incoming.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+                const existingCount = (event?.photoPaths || []).filter((path) => !removedPhotoPaths.includes(path)).length;
+                const available = Math.max(0, 8 - existingCount - photoFiles.length);
+                const accepted = valid.slice(0, available);
                 if (valid.length !== incoming.length) setLocalError("Поддерживаются JPG, PNG и WebP размером до 5 МБ каждый.");
-                if (valid.length) setPhotoFiles((current) => [...current, ...valid].slice(0, 8));
+                else if (accepted.length !== valid.length) setLocalError("К одному событию можно прикрепить не более 8 фотографий.");
+                if (accepted.length) setPhotoFiles((current) => [...current, ...accepted]);
                 e.currentTarget.value = "";
               }} /></label>
             </div>
@@ -658,7 +662,7 @@ function App() {
     if (draft.photos.length && (!supabase || !session?.user.id)) {
       throw new Error("Чтобы сохранить фотографии, войдите в облачный аккаунт. В демо-режиме можно сохранять события без вложений.");
     }
-    if (draft.photos.length > 8) throw new Error("Можно прикрепить не более 8 фотографий к событию.");
+    if (existingPhotoPaths.length + draft.photos.length > 8) throw new Error("К одному событию можно прикрепить не более 8 фотографий.");
     if (draft.photos.some((photo) => photo.size > 5 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(photo.type))) {
       throw new Error("Фотографии должны быть в JPG, PNG или WebP размером до 5 МБ.");
     }
@@ -993,10 +997,10 @@ function App() {
             {monthDays.map((day) => <button key={day.toISOString()} className={"mini-day" + (!isSameMonth(day, focusDate) ? " out-month" : "") + (isSameDay(day, focusDate) ? " selected" : "") + (isToday(day) ? " is-today" : "")} onClick={() => { setFocusDate(day); setView("day"); setMobileMenuOpen(false); }}>{format(day, "d")}{events.some((event) => isSameDay(new Date(event.startAt), day)) && <i />}</button>)}
           </div>
           <div className="sidebar-section-heading"><span>Разделы</span></div>
-          <button className={"sidebar-nav-item" + (activePage === "calendar" ? " active" : "")} onClick={() => { setActivePage("calendar"); setView("week"); }}><CalendarRange size={17} /><span>Календарь</span><span className="nav-count">{events.length}</span></button>
-          <button className={"sidebar-nav-item" + (activePage === "tasks" ? " active" : "")} onClick={() => setActivePage("tasks")}><ListTodo size={17} /><span>Мои задачи</span><span className="nav-count">{tasks.filter((task) => !task.completed).length}</span></button>
-          <button className={"sidebar-nav-item" + (activePage === "people" ? " active" : "")} onClick={() => setActivePage("people")}><Users size={17} /><span>Люди</span><span className="nav-count">{people.length}</span></button>
-          <button className={"sidebar-nav-item" + (activePage === "profile" ? " active" : "")} onClick={() => setActivePage("profile")}><UserCircle size={17} /><span>Мой профиль</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "calendar" ? " active" : "")} onClick={() => { setActivePage("calendar"); setView("week"); setMobileMenuOpen(false); }}><CalendarRange size={17} /><span>Календарь</span><span className="nav-count">{events.length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "tasks" ? " active" : "")} onClick={() => { setActivePage("tasks"); setMobileMenuOpen(false); }}><ListTodo size={17} /><span>Мои задачи</span><span className="nav-count">{tasks.filter((task) => !task.completed).length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "people" ? " active" : "")} onClick={() => { setActivePage("people"); setMobileMenuOpen(false); }}><Users size={17} /><span>Люди</span><span className="nav-count">{people.length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "profile" ? " active" : "")} onClick={() => { setActivePage("profile"); setMobileMenuOpen(false); }}><UserCircle size={17} /><span>Мой профиль</span></button>
           <div className="sidebar-section-heading section-with-action"><span>Предстоящие</span><button onClick={() => openNewEvent(new Date())} aria-label="Добавить событие"><Plus size={16} /></button></div>
           <div className="sidebar-upcoming">
             {nextEvents.slice(0, 3).map((event) => <button className="sidebar-event" key={event.id} onClick={() => openEditEvent(event)}><span className={"event-dot dot-" + event.color} /><span className="sidebar-event-copy"><strong>{event.title}</strong><small>{format(new Date(event.startAt), "EEE, d MMM · HH:mm", { locale: ru })}</small></span></button>)}
