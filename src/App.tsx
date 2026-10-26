@@ -10,14 +10,20 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Cloud, Coffee,
   Download, Ellipsis, Eye, EyeOff, Focus, Home, LayoutGrid, ListTodo, LockKeyhole,
   LogIn, LogOut, Mail, Menu, Moon, Plus, Search, Settings2, ShieldCheck,
-  Smartphone, Sparkles, Sun, Trash2, UserRound, UserPlus, X, Zap
+  Smartphone, Sparkles, Sun, Trash2, UserRound, UserPlus, X, Zap,
+  MapPin, ImagePlus, Users, History, Phone, AtSign, Cake, PanelRightClose, PanelRightOpen,
+  Save, Pencil, CalendarCheck, Clock4, ClipboardList, UserCircle, ArrowUpRight
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseConfigured, vapidPublicKey } from "./lib/supabase";
 import { EVENT_COLORS, type CalendarEvent, type CalendarTask, type CalendarView } from "./lib/types";
 
 type AuthMode = "login" | "signup" | "forgot" | "update";
+type AppPage = "calendar" | "tasks" | "profile" | "people";
 type ToastState = { message: string; kind?: "success" | "error" | "info" } | null;
+type ProfileDraft = { displayName: string; phone: string; birthday: string; bio: string; avatarUrl: string };
+type PersonRecord = { id: string; name: string; relationship: string; email: string; phone: string; notes: string; createdAt: string };
+type VisitRecord = { id: string; personId: string | null; title: string; visitedAt: string; notes: string; personName?: string };
 type EventDraft = {
   title: string;
   description: string;
@@ -26,8 +32,20 @@ type EventDraft = {
   end: string;
   color: string;
   reminder: string;
+  location: string;
+  allDay: boolean;
+  photos: File[];
+  removedPhotoPaths: string[];
 };
 
+const readLocal = <T,>(key: string, fallback: T): T => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? (JSON.parse(stored) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+};
 const uid = () => crypto.randomUUID();
 const dateInput = (date: Date) => format(date, "yyyy-MM-dd");
 const timeInput = (date: Date) => format(date, "HH:mm");
@@ -40,6 +58,9 @@ const rowToEvent = (row: any): CalendarEvent => ({
   color: row.color || "red",
   reminderAt: row.reminder_at || null,
   reminderSentAt: row.reminder_sent_at || null,
+  location: row.location || "",
+  allDay: Boolean(row.all_day),
+  photoPaths: Array.isArray(row.photo_paths) ? row.photo_paths : [],
 });
 const rowToTask = (row: any): CalendarTask => ({
   id: String(row.id),
@@ -57,6 +78,9 @@ const eventToRow = (event: CalendarEvent, userId: string) => ({
   color: event.color,
   reminder_at: event.reminderAt,
   reminder_sent_at: null,
+  location: event.location || "",
+  all_day: Boolean(event.allDay),
+  photo_paths: event.photoPaths || [],
 });
 const taskToRow = (task: CalendarTask, userId: string) => ({
   user_id: userId,
@@ -185,8 +209,8 @@ function AuthScreen({
     update: "Новый пароль",
   };
   const descriptions: Record<AuthMode, string> = {
-    login: "Ваши планы уже ждут вас.",
-    signup: "Одно пространство для всех ваших дней.",
+    login: "Войдите, чтобы открыть календарь и продолжить с того места, где остановились.",
+    signup: "Создайте аккаунт, подтвердите почту и сохраняйте встречи и задачи в облаке. На каждом устройстве вы увидите свои планы.",
     forgot: "Отправим безопасную ссылку на вашу почту.",
     update: "Придумайте надёжный пароль для аккаунта.",
   };
@@ -221,11 +245,12 @@ function AuthScreen({
             <h2>{titles[mode]}</h2>
             <p>{descriptions[mode]}</p>
           </div>
-          {mode === "login" && (
+          {(mode === "login" || mode === "signup") && (
             <>
               <button className="google-button" type="button" disabled={busy} onClick={googleLogin}>
-                <span className="google-g">G</span> Продолжить с Google
+                <span className="google-g">G</span> {mode === "signup" ? "Создать аккаунт через Google" : "Продолжить с Google"}
               </button>
+              <p className="google-explainer">{mode === "signup" ? "Google подтвердит ваш адрес и создаст профиль Calender без отдельного пароля." : "Впервые в Calender? Первый вход через Google автоматически создаст аккаунт."}</p>
               <div className="auth-divider"><span />или с помощью почты<span /></div>
             </>
           )}
@@ -260,7 +285,7 @@ function AuthScreen({
             {mode === "forgot" && <button className="text-action back-action" onClick={() => { setMode("login"); setMessage(""); setError(""); }}><ArrowLeft size={14} /> Вернуться ко входу</button>}
             {mode === "update" && !forceRecovery && <button className="text-action back-action" onClick={() => setMode("login")}><ArrowLeft size={14} /> Вернуться ко входу</button>}
           </div>
-          <p className="auth-legal">Продолжая, вы подтверждаете, что ознакомились с <a href="./terms.html" target="_blank" rel="noreferrer">условиями использования</a> и <a href="./privacy.html" target="_blank" rel="noreferrer">политикой конфиденциальности</a>.</p>
+          <p className="auth-legal">{mode === "signup" ? "При регистрации мы создадим ваш личный календарь. Подтверждение почты нужно для защиты аккаунта и восстановления доступа." : mode === "forgot" ? "Для безопасности мы не раскрываем, существует ли аккаунт с указанной почтой." : "Продолжая, вы подтверждаете, что ознакомились с условиями использования и политикой конфиденциальности."} <a href="./terms.html" target="_blank" rel="noreferrer">Условия</a> · <a href="./privacy.html" target="_blank" rel="noreferrer">Конфиденциальность</a></p>
         </div>
       </section>
     </div>
@@ -288,8 +313,38 @@ function EventModal({
   const [end, setEnd] = useState(event ? timeInput(new Date(event.endAt)) : timeInput(addMinutes(initialDate, 45)));
   const [color, setColor] = useState(event?.color || "red");
   const [reminder, setReminder] = useState(event ? (event.reminderAt ? String(Math.max(0, Math.round((new Date(event.startAt).getTime() - new Date(event.reminderAt).getTime()) / 60000))) : "0") : "10");
+  const [location, setLocation] = useState(event?.location || "");
+  const [allDay, setAllDay] = useState(Boolean(event?.allDay));
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<{ file: File; url: string }[]>([]);
+  const [savedPhotoUrls, setSavedPhotoUrls] = useState<{ path: string; url: string }[]>([]);
+  const [removedPhotoPaths, setRemovedPhotoPaths] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState("");
+  const photoPathsKey = (event?.photoPaths || []).join("|");
+
+  useEffect(() => {
+    let active = true;
+    const paths = (event?.photoPaths || []).filter((path) => !removedPhotoPaths.includes(path));
+    if (!supabase || !paths.length) {
+      setSavedPhotoUrls([]);
+      return () => { active = false; };
+    }
+    Promise.all(paths.map(async (path) => {
+      const { data, error } = await supabase!.storage.from("event-photos").createSignedUrl(path, 3600);
+      if (error) return null;
+      return data?.signedUrl ? { path, url: data.signedUrl } : null;
+    })).then((results) => {
+      if (active) setSavedPhotoUrls(results.filter((item): item is { path: string; url: string } => Boolean(item)));
+    }).catch((error) => console.warn("Could not create event photo preview URLs:", error));
+    return () => { active = false; };
+  }, [photoPathsKey, removedPhotoPaths.join("|")]);
+
+  useEffect(() => {
+    const previews = photoFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));
+    setPhotoPreviews(previews);
+    return () => previews.forEach((preview) => URL.revokeObjectURL(preview.url));
+  }, [photoFiles]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -297,8 +352,8 @@ function EventModal({
       setLocalError("Добавьте название события.");
       return;
     }
-    const startDate = new Date(day + "T" + start + ":00");
-    let endDate = new Date(day + "T" + end + ":00");
+    const startDate = new Date(day + "T" + (allDay ? "00:00" : start) + ":00");
+    let endDate = new Date(day + "T" + (allDay ? "23:59" : end) + ":00");
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
       setLocalError("Проверьте дату и время.");
       return;
@@ -317,11 +372,17 @@ function EventModal({
         end: format(endDate, "HH:mm"),
         color,
         reminder: String(minutes),
+        location: location.trim(),
+        allDay,
+        photos: photoFiles,
+        removedPhotoPaths,
       }, event ? {
         ...event,
         startAt: startDate.toISOString(),
         endAt: endDate.toISOString(),
         reminderAt,
+        location: location.trim(),
+        allDay,
       } : null);
       onClose();
     } catch (err: any) {
@@ -363,11 +424,29 @@ function EventModal({
               </select>
             </label>
           </div>
-          <div className="form-two-cols">
+          <label className="all-day-toggle"><input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /><CalendarCheck size={16} /><span>Событие на весь день</span></label>
+          {!allDay && <div className="form-two-cols">
             <label className="field-label">Начало<input className="plain-input" type="time" value={start} onChange={(e) => setStart(e.target.value)} required /></label>
             <label className="field-label">Окончание<input className="plain-input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} required /></label>
-          </div>
+          </div>}
+          <label className="field-label">Местоположение <span className="optional-label">необязательно</span><span className="input-with-icon"><MapPin size={16} /><input className="plain-input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Адрес, кафе или ссылка на место" maxLength={500} /></span></label>
           <label className="field-label">Заметка <span className="optional-label">необязательно</span><textarea className="plain-input note-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Контекст, ссылка, что не забыть…" maxLength={1200} rows={3} /></label>
+          <div className="photo-attachments">
+            <div className="field-label"><span>Фотографии <span className="optional-label">до 5 МБ на фото</span></span>
+              <label className="photo-upload-button"><ImagePlus size={16} /> Добавить фото<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(e) => {
+                const incoming = Array.from(e.target.files || []);
+                const valid = incoming.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+                if (valid.length !== incoming.length) setLocalError("Поддерживаются JPG, PNG и WebP размером до 5 МБ каждый.");
+                if (valid.length) setPhotoFiles((current) => [...current, ...valid].slice(0, 8));
+                e.currentTarget.value = "";
+              }} /></label>
+            </div>
+            {(savedPhotoUrls.length > 0 || photoPreviews.length > 0) && <div className="photo-preview-grid">
+              {savedPhotoUrls.map((photo) => <div className="photo-preview" key={photo.path}><img src={photo.url} alt="Прикреплённая фотография" /><button type="button" aria-label="Убрать фото" onClick={() => { setRemovedPhotoPaths((current) => [...current, photo.path]); setSavedPhotoUrls((current) => current.filter((item) => item.path !== photo.path)); }}><X size={13} /></button></div>)}
+              {photoPreviews.map((photo, index) => <div className="photo-preview" key={photo.url}><img src={photo.url} alt={photo.file.name} /><button type="button" aria-label="Убрать фото" onClick={() => setPhotoFiles((current) => current.filter((_, i) => i !== index))}><X size={13} /></button></div>)}
+            </div>}
+            <p className="attachment-hint">Фотографии будут храниться в приватном облачном хранилище и доступны только владельцу события.</p>
+          </div>
           <div className="field-label">Цвет события
             <div className="color-picker">{EVENT_COLORS.map((c) => <button key={c.value} type="button" className={"color-choice color-" + c.value + (color === c.value ? " selected" : "")} aria-label={c.label} title={c.label} onClick={() => setColor(c.value)} />)}</div>
           </div>
@@ -388,6 +467,15 @@ function App() {
   const [authReady, setAuthReady] = useState(!supabaseConfigured);
   const [forceRecovery, setForceRecovery] = useState(false);
   const [view, setView] = useState<CalendarView>("week");
+  const [activePage, setActivePage] = useState<AppPage>("calendar");
+  const [showInsightsPanel, setShowInsightsPanel] = useState(() => localStorage.getItem("calender-show-insights") !== "false");
+  const [profile, setProfile] = useState<ProfileDraft>(() => readLocal("calender-demo-profile", { displayName: "", phone: "", birthday: "", bio: "", avatarUrl: "" }));
+  const [people, setPeople] = useState<PersonRecord[]>(() => readLocal("calender-demo-people", []));
+  const [visitHistory, setVisitHistory] = useState<VisitRecord[]>(() => readLocal("calender-demo-visits", []));
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [personDraft, setPersonDraft] = useState({ name: "", relationship: "", email: "", phone: "", notes: "" });
+  const [editingPerson, setEditingPerson] = useState<PersonRecord | null>(null);
+  const [visitDraft, setVisitDraft] = useState({ personId: "", title: "", visitedAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"), notes: "" });
   const [focusDate, setFocusDate] = useState(startOfDay(new Date()));
   const [events, setEvents] = useState<CalendarEvent[]>(() => supabaseConfigured ? [] : makeDemoEvents());
   const [tasks, setTasks] = useState<CalendarTask[]>(() => supabaseConfigured ? [] : makeDemoTasks());
@@ -442,17 +530,35 @@ function App() {
     const loadCloudData = async () => {
       setLoadingData(true);
       try {
-        const [eventResult, taskResult, pushResult] = await Promise.all([
-          client.from("events").select("id,title,description,start_at,end_at,color,reminder_at,reminder_sent_at").order("start_at", { ascending: true }).limit(500),
+        const [eventResult, taskResult, pushResult, profileResult, peopleResult, visitResult] = await Promise.all([
+          client.from("events").select("id,title,description,start_at,end_at,color,reminder_at,reminder_sent_at,location,all_day,photo_paths").order("start_at", { ascending: true }).limit(500),
           client.from("tasks").select("id,title,due_at,completed,color").order("created_at", { ascending: false }).limit(200),
           client.from("push_subscriptions").select("endpoint").limit(10),
+          client.from("profiles").select("user_id,display_name,phone,birthday,bio,avatar_url").maybeSingle(),
+          client.from("people").select("id,name,relationship,email,phone,notes,created_at").order("name", { ascending: true }).limit(500),
+          client.from("visit_history").select("id,person_id,title,visited_at,notes").order("visited_at", { ascending: false }).limit(200),
         ]);
         if (!active) return;
         if (eventResult.error) throw eventResult.error;
         if (taskResult.error) throw taskResult.error;
+        if (profileResult.error) throw profileResult.error;
+        if (peopleResult.error) throw peopleResult.error;
+        if (visitResult.error) throw visitResult.error;
+        const cloudPeople: PersonRecord[] = (peopleResult.data || []).map((row: any) => ({ id: row.id, name: row.name, relationship: row.relationship || "", email: row.email || "", phone: row.phone || "", notes: row.notes || "", createdAt: row.created_at }));
         setEvents((eventResult.data || []).map(rowToEvent));
         setTasks((taskResult.data || []).map(rowToTask));
         setPushEnabled(Boolean(pushResult.data?.length));
+        const cloudProfile = profileResult.data as any;
+        setProfile({
+          displayName: cloudProfile?.display_name || session.user.user_metadata?.full_name || session.user.user_metadata?.name || "",
+          phone: cloudProfile?.phone || "", birthday: cloudProfile?.birthday || "",
+          bio: cloudProfile?.bio || "", avatarUrl: cloudProfile?.avatar_url || session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || "",
+        });
+        setPeople(cloudPeople);
+        setVisitHistory((visitResult.data || []).map((row: any) => ({
+          id: row.id, personId: row.person_id || null, title: row.title, visitedAt: row.visited_at, notes: row.notes || "",
+          personName: cloudPeople.find((person) => person.id === row.person_id)?.name || "",
+        })));
       } catch (error: any) {
         if (active) {
           console.error("Calender data load failed:", error);
@@ -468,6 +574,9 @@ function App() {
       .channel("calender-data-" + session.user.id)
       .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => { void loadCloudData(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => { void loadCloudData(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => { void loadCloudData(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "people" }, () => { void loadCloudData(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "visit_history" }, () => { void loadCloudData(); })
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn("Calender realtime channel status:", status);
@@ -484,10 +593,18 @@ function App() {
     try {
       localStorage.setItem("calender-demo-events", JSON.stringify(events));
       localStorage.setItem("calender-demo-tasks", JSON.stringify(tasks));
+      localStorage.setItem("calender-demo-profile", JSON.stringify(profile));
+      localStorage.setItem("calender-demo-people", JSON.stringify(people));
+      localStorage.setItem("calender-demo-visits", JSON.stringify(visitHistory));
+      localStorage.setItem("calender-show-insights", String(showInsightsPanel));
     } catch (error) {
       console.warn("Could not persist demo data", error);
     }
-  }, [events, tasks, demoMode]);
+  }, [events, tasks, demoMode, profile, people, visitHistory, showInsightsPanel]);
+
+  useEffect(() => {
+    try { localStorage.setItem("calender-show-insights", String(showInsightsPanel)); } catch (_) {}
+  }, [showInsightsPanel]);
 
   useEffect(() => {
     const onInstall = (event: Event) => {
@@ -531,13 +648,36 @@ function App() {
   };
 
   const saveEvent = async (draft: EventDraft, existing: CalendarEvent | null) => {
-    const startAt = new Date(draft.date + "T" + draft.start + ":00").toISOString();
-    let endDate = new Date(draft.date + "T" + draft.end + ":00");
-    const startDate = new Date(startAt);
+    const startDate = new Date(draft.date + "T" + (draft.allDay ? "00:00" : draft.start) + ":00");
+    let endDate = new Date(draft.date + "T" + (draft.allDay ? "23:59" : draft.end) + ":00");
     if (endDate <= startDate) endDate = addDays(endDate, 1);
+    const startAt = startDate.toISOString();
     const minutes = Number(draft.reminder);
+    const existingPhotoPaths = (existing?.photoPaths || []).filter((path) => !draft.removedPhotoPaths.includes(path));
+    const uploadedPhotoPaths: string[] = [];
+    if (draft.photos.length && (!supabase || !session?.user.id)) {
+      throw new Error("Чтобы сохранить фотографии, войдите в облачный аккаунт. В демо-режиме можно сохранять события без вложений.");
+    }
+    if (draft.photos.length > 8) throw new Error("Можно прикрепить не более 8 фотографий к событию.");
+    if (draft.photos.some((photo) => photo.size > 5 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(photo.type))) {
+      throw new Error("Фотографии должны быть в JPG, PNG или WebP размером до 5 МБ.");
+    }
+    const eventId = existing?.id || uid();
+    if (supabase && session?.user.id) {
+      for (const photo of draft.photos) {
+        const safeName = photo.name.normalize("NFKD").replace(/[^a-zA-Z0-9._-]/g, "-").slice(-80) || "photo";
+        const path = session.user.id + "/" + eventId + "/" + uid() + "-" + safeName;
+        const { error: uploadError } = await supabase.storage.from("event-photos").upload(path, photo, { contentType: photo.type, upsert: false });
+        if (uploadError) {
+          if (uploadedPhotoPaths.length) await supabase.storage.from("event-photos").remove(uploadedPhotoPaths);
+          console.error("Calender photo upload failed:", uploadError);
+          throw new Error("Не удалось загрузить фотографию. Проверьте миграцию и права хранилища.");
+        }
+        uploadedPhotoPaths.push(path);
+      }
+    }
     const event: CalendarEvent = {
-      id: existing?.id || uid(),
+      id: eventId,
       title: draft.title,
       description: draft.description,
       startAt,
@@ -545,6 +685,9 @@ function App() {
       color: draft.color,
       reminderAt: minutes > 0 ? new Date(startDate.getTime() - minutes * 60000).toISOString() : null,
       reminderSentAt: null,
+      location: draft.location,
+      allDay: draft.allDay,
+      photoPaths: [...existingPhotoPaths, ...uploadedPhotoPaths],
     };
     if (supabase && session?.user.id) {
       const payload = eventToRow(event, session.user.id);
@@ -552,8 +695,13 @@ function App() {
         ? await supabase.from("events").update(payload).eq("id", existing.id).select().single()
         : await supabase.from("events").insert(payload).select().single();
       if (result.error) {
+        if (uploadedPhotoPaths.length) await supabase.storage.from("event-photos").remove(uploadedPhotoPaths);
         console.error("Calender event save failed:", result.error);
-        throw new Error("Событие не сохранено. Проверьте подключение и RLS.");
+        throw new Error("Событие не сохранено. Проверьте, применена ли миграция и настроены ли RLS-политики.");
+      }
+      if (draft.removedPhotoPaths.length) {
+        const { error: removeError } = await supabase.storage.from("event-photos").remove(draft.removedPhotoPaths);
+        if (removeError) console.warn("Could not remove event photos:", removeError.message);
       }
       const saved = rowToEvent(result.data);
       setEvents((current) => existing ? current.map((item) => item.id === saved.id ? saved : item) : current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
@@ -618,6 +766,119 @@ function App() {
     }
     setTasks((current) => current.filter((item) => item.id !== task.id));
     notify("Задача удалена", "success");
+  };
+
+  const saveProfile = async (e: FormEvent) => {
+    e.preventDefault();
+    setProfileBusy(true);
+    try {
+      const payload = {
+        user_id: session?.user.id,
+        display_name: profile.displayName.trim().slice(0, 100),
+        phone: profile.phone.trim().slice(0, 40),
+        birthday: profile.birthday || null,
+        bio: profile.bio.trim().slice(0, 1000),
+        avatar_url: profile.avatarUrl.trim().slice(0, 1000),
+      };
+      if (supabase && session?.user.id) {
+        const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
+        if (error) throw error;
+        const { error: metadataError } = await supabase.auth.updateUser({ data: { full_name: payload.display_name } });
+        if (metadataError) console.warn("Calender profile auth metadata update failed:", metadataError.message);
+      }
+      setProfile((current) => ({ ...current, displayName: payload.display_name, phone: payload.phone, birthday: payload.birthday || "", bio: payload.bio }));
+      notify("Профиль сохранён", "success");
+    } catch (error: any) {
+      console.error("Calender profile save failed:", error);
+      notify(error?.message || "Не удалось сохранить профиль.", "error");
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const savePerson = async (e: FormEvent) => {
+    e.preventDefault();
+    const name = personDraft.name.trim();
+    if (!name) return;
+    const payload = { name, relationship: personDraft.relationship.trim(), email: personDraft.email.trim(), phone: personDraft.phone.trim(), notes: personDraft.notes.trim() };
+    try {
+      if (supabase && session?.user.id) {
+        const query = editingPerson
+          ? supabase.from("people").update(payload).eq("id", editingPerson.id).select().single()
+          : supabase.from("people").insert({ ...payload, user_id: session.user.id }).select().single();
+        const { data, error } = await query;
+        if (error) throw error;
+        const saved: PersonRecord = { id: data.id, ...payload, createdAt: data.created_at };
+        setPeople((current) => editingPerson ? current.map((person) => person.id === editingPerson.id ? saved : person) : [...current, saved].sort((a,b) => a.name.localeCompare(b.name, "ru")));
+      } else {
+        const saved: PersonRecord = { id: editingPerson?.id || uid(), ...payload, createdAt: editingPerson?.createdAt || new Date().toISOString() };
+        setPeople((current) => editingPerson ? current.map((person) => person.id === editingPerson.id ? saved : person) : [...current, saved].sort((a,b) => a.name.localeCompare(b.name, "ru")));
+      }
+      setPersonDraft({ name: "", relationship: "", email: "", phone: "", notes: "" });
+      setEditingPerson(null);
+      notify(editingPerson ? "Контакт обновлён" : "Человек добавлен в список", "success");
+    } catch (error: any) {
+      console.error("Calender person save failed:", error);
+      notify(error?.message || "Не удалось сохранить контакт.", "error");
+    }
+  };
+
+  const deletePerson = async (person: PersonRecord) => {
+    if (!window.confirm("Удалить контакт «" + person.name + "»? Записи истории останутся без привязки к нему.")) return;
+    try {
+      if (supabase && session?.user.id) {
+        const { error } = await supabase.from("people").delete().eq("id", person.id);
+        if (error) throw error;
+      }
+      setPeople((current) => current.filter((item) => item.id !== person.id));
+      setVisitHistory((current) => current.map((visit) => visit.personId === person.id ? { ...visit, personId: null, personName: "" } : visit));
+      if (editingPerson?.id === person.id) {
+        setEditingPerson(null);
+        setPersonDraft({ name: "", relationship: "", email: "", phone: "", notes: "" });
+      }
+      notify("Контакт удалён", "success");
+    } catch (error: any) {
+      console.error("Calender person delete failed:", error);
+      notify(error?.message || "Не удалось удалить контакт.", "error");
+    }
+  };
+
+  const saveVisit = async (e: FormEvent) => {
+    e.preventDefault();
+    const title = visitDraft.title.trim();
+    if (!title) return;
+    const visitedAt = new Date(visitDraft.visitedAt).toISOString();
+    try {
+      if (supabase && session?.user.id) {
+        const { data, error } = await supabase.from("visit_history").insert({
+          user_id: session.user.id, person_id: visitDraft.personId || null, title, visited_at: visitedAt, notes: visitDraft.notes.trim(),
+        }).select().single();
+        if (error) throw error;
+        const personName = people.find((person) => person.id === visitDraft.personId)?.name || "";
+        setVisitHistory((current) => [{ id: data.id, personId: data.person_id, title: data.title, visitedAt: data.visited_at, notes: data.notes || "", personName }, ...current]);
+      } else {
+        const personName = people.find((person) => person.id === visitDraft.personId)?.name || "";
+        setVisitHistory((current) => [{ id: uid(), personId: visitDraft.personId || null, title, visitedAt, notes: visitDraft.notes.trim(), personName }, ...current]);
+      }
+      setVisitDraft({ personId: "", title: "", visitedAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"), notes: "" });
+      notify("Запись добавлена в историю", "success");
+    } catch (error: any) {
+      console.error("Calender visit history save failed:", error);
+      notify(error?.message || "Не удалось записать историю.", "error");
+    }
+  };
+
+  const deleteVisit = async (visit: VisitRecord) => {
+    try {
+      if (supabase && session?.user.id) {
+        const { error } = await supabase.from("visit_history").delete().eq("id", visit.id);
+        if (error) throw error;
+      }
+      setVisitHistory((current) => current.filter((item) => item.id !== visit.id));
+      notify("Запись удалена", "success");
+    } catch (error: any) {
+      notify(error?.message || "Не удалось удалить запись.", "error");
+    }
   };
 
   const navigateDate = (amount: number) => {
@@ -732,8 +993,10 @@ function App() {
             {monthDays.map((day) => <button key={day.toISOString()} className={"mini-day" + (!isSameMonth(day, focusDate) ? " out-month" : "") + (isSameDay(day, focusDate) ? " selected" : "") + (isToday(day) ? " is-today" : "")} onClick={() => { setFocusDate(day); setView("day"); setMobileMenuOpen(false); }}>{format(day, "d")}{events.some((event) => isSameDay(new Date(event.startAt), day)) && <i />}</button>)}
           </div>
           <div className="sidebar-section-heading"><span>Разделы</span></div>
-          <button className="sidebar-nav-item active" onClick={() => { setView("week"); setFocusDate(startOfDay(new Date())); }}><CalendarRange size={17} /><span>Календарь</span><span className="nav-count">{events.length}</span></button>
-          <button className="sidebar-nav-item" onClick={() => document.getElementById("tasks-panel")?.scrollIntoView({ behavior: "smooth" })}><ListTodo size={17} /><span>Мои задачи</span><span className="nav-count">{tasks.filter((task) => !task.completed).length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "calendar" ? " active" : "")} onClick={() => { setActivePage("calendar"); setView("week"); }}><CalendarRange size={17} /><span>Календарь</span><span className="nav-count">{events.length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "tasks" ? " active" : "")} onClick={() => setActivePage("tasks")}><ListTodo size={17} /><span>Мои задачи</span><span className="nav-count">{tasks.filter((task) => !task.completed).length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "people" ? " active" : "")} onClick={() => setActivePage("people")}><Users size={17} /><span>Люди</span><span className="nav-count">{people.length}</span></button>
+          <button className={"sidebar-nav-item" + (activePage === "profile" ? " active" : "")} onClick={() => setActivePage("profile")}><UserCircle size={17} /><span>Мой профиль</span></button>
           <div className="sidebar-section-heading section-with-action"><span>Предстоящие</span><button onClick={() => openNewEvent(new Date())} aria-label="Добавить событие"><Plus size={16} /></button></div>
           <div className="sidebar-upcoming">
             {nextEvents.slice(0, 3).map((event) => <button className="sidebar-event" key={event.id} onClick={() => openEditEvent(event)}><span className={"event-dot dot-" + event.color} /><span className="sidebar-event-copy"><strong>{event.title}</strong><small>{format(new Date(event.startAt), "EEE, d MMM · HH:mm", { locale: ru })}</small></span></button>)}
@@ -756,13 +1019,16 @@ function App() {
         <main className="main-panel">
           <header className="main-topbar">
             <div className="mobile-menu-title"><button className="subtle-icon-button mobile-menu-trigger" onClick={() => setMobileMenuOpen(true)} aria-label="Меню"><Menu size={20} /></button><span className="mobile-main-title">Календарь</span></div>
-            <div className="topbar-date"><h1>{humanMonth(focusDate)}</h1><span className="today-caption">{format(focusDate, "EEEE, d MMMM", { locale: ru })}</span></div>
+            <div className="topbar-date"><h1>{activePage === "calendar" ? humanMonth(focusDate) : activePage === "tasks" ? "Мои задачи" : activePage === "profile" ? "Мой профиль" : "Люди"}</h1><span className="today-caption">{activePage === "calendar" ? format(focusDate, "EEEE, d MMMM", { locale: ru }) : activePage === "tasks" ? "Все дела в одном месте" : activePage === "profile" ? "Ваши данные и настройки аккаунта" : "Контакты и история встреч"}</span></div>
             <div className="topbar-actions">
-              <div className="date-nav"><button onClick={() => navigateDate(-1)} aria-label="Назад"><ChevronLeft size={17} /></button><button className="today-button" onClick={() => setFocusDate(startOfDay(new Date()))}>Сегодня</button><button onClick={() => navigateDate(1)} aria-label="Вперёд"><ChevronRight size={17} /></button></div>
-              <div className="view-switcher">{viewLabels.map((item) => <button key={item.value} onClick={() => setView(item.value)} className={view === item.value ? "selected" : ""}>{item.label}</button>)}</div>
-              <button className="topbar-icon-button" onClick={enablePush} aria-label="Уведомления" title="Уведомления">{pushEnabled ? <CheckCheck size={17} /> : <Bell size={17} />}</button>
-              <button className="topbar-icon-button theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="Сменить тему" title="Сменить тему">{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
-              <button className="primary-button create-button" onClick={() => openNewEvent()}><Plus size={17} /><span>Создать</span></button>
+              {activePage === "calendar" && <div className="date-nav"><button onClick={() => navigateDate(-1)} aria-label="Назад"><ChevronLeft size={17} /></button><button className="today-button" onClick={() => setFocusDate(startOfDay(new Date()))}>Сегодня</button><button onClick={() => navigateDate(1)} aria-label="Вперёд"><ChevronRight size={17} /></button></div>}
+              {activePage === "calendar" && <div className="view-switcher">{viewLabels.map((item) => <button key={item.value} onClick={() => setView(item.value)} className={view === item.value ? "selected" : ""}>{item.label}</button>)}</div>}
+              {activePage === "calendar" && <button className="topbar-icon-button" onClick={enablePush} aria-label="Уведомления" title="Уведомления">{pushEnabled ? <CheckCheck size={17} /> : <Bell size={17} />}</button>}
+              {activePage === "calendar" && <button className="topbar-icon-button panel-toggle-button" onClick={() => setShowInsightsPanel((current) => !current)} aria-label={showInsightsPanel ? "Скрыть правую панель" : "Показать правую панель"} title={showInsightsPanel ? "Скрыть правую панель" : "Показать правую панель"}>{showInsightsPanel ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>}
+              {activePage === "calendar" && <button className="primary-button create-button" onClick={() => openNewEvent()}><Plus size={17} /><span>Событие</span></button>}
+              {activePage === "tasks" && <button className="primary-button create-button" onClick={() => document.getElementById("tasks-page-input")?.focus()}><Plus size={17} /><span>Задача</span></button>}
+              {activePage === "people" && <button className="primary-button create-button" onClick={() => document.getElementById("person-name-input")?.focus()}><Plus size={17} /><span>Контакт</span></button>}
+              {activePage === "profile" && <button className="primary-button create-button" onClick={() => void signOut()}><LogOut size={16} /><span>Выйти</span></button>}
             </div>
           </header>
 
@@ -775,7 +1041,7 @@ function App() {
             </div>
           </div>
 
-          <section className="agenda-scroll" aria-label="Календарь">
+          {activePage === "calendar" && <section className="agenda-scroll" aria-label="Календарь">
             {view === "month" && (
               <div className="month-view">
                 <div className="month-weekdays">{["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"].map((day, index) => <span key={day} className={index > 4 ? "weekend" : ""}>{day}</span>)}</div>
@@ -785,7 +1051,7 @@ function App() {
                     return <div key={day.toISOString()} className={"month-cell" + (!isSameMonth(day, focusDate) ? " outside" : "") + (isToday(day) ? " today-cell" : "") + (isSameDay(day, focusDate) ? " focus-cell" : "")} onDoubleClick={() => openNewEvent(day)}>
                       <button className={"month-cell-date" + (isToday(day) ? " today-number" : "")} onClick={() => setFocusDate(day)}>{format(day, "d")}</button>
                       <div className="month-cell-events">
-                        {dayEvents.slice(0, 3).map((event) => <button key={event.id} className={"month-event event-" + event.color} onClick={() => openEditEvent(event)} title={event.title}><span>{format(new Date(event.startAt), "HH:mm")}</span> {event.title}</button>)}
+                        {dayEvents.slice(0, 3).map((event) => <button key={event.id} className={"month-event event-" + event.color} onClick={() => openEditEvent(event)} title={event.title}><span>{event.allDay ? "Весь день" : format(new Date(event.startAt), "HH:mm")}</span> {event.title}</button>)}
                         {dayEvents.length > 3 && <button className="more-events" onClick={() => { setFocusDate(day); setView("day"); }}>+ ещё {dayEvents.length - 3}</button>}
                         {!dayEvents.length && isSameDay(day, focusDate) && <button className="add-in-cell" onClick={() => openNewEvent(day)}><Plus size={14} /> Добавить</button>}
                       </div>
@@ -808,8 +1074,8 @@ function App() {
                     <div className="day-timeline">
                       {dayEvents.map((event) => <button className={"agenda-event event-" + event.color} key={event.id} onClick={() => openEditEvent(event)}>
                         <span className={"agenda-event-line line-" + event.color} />
-                        <span className="agenda-event-time"><strong>{format(new Date(event.startAt), "HH:mm")}</strong><small>{format(new Date(event.endAt), "HH:mm")}</small></span>
-                        <span className="agenda-event-copy"><span className="event-category">{event.color === "red" ? "Важное" : event.color === "green" ? "Работа" : event.color === "yellow" ? "Личное" : event.color === "blue" ? "План" : "Идеи"}</span><strong>{event.title}</strong>{event.description && <small>{event.description}</small>}</span>
+                        <span className="agenda-event-time"><strong>{event.allDay ? "Весь день" : format(new Date(event.startAt), "HH:mm")}</strong>{!event.allDay && <small>{format(new Date(event.endAt), "HH:mm")}</small>}</span>
+                        <span className="agenda-event-copy"><span className="event-category">{event.color === "red" ? "Важное" : event.color === "green" ? "Работа" : event.color === "yellow" ? "Личное" : event.color === "blue" ? "План" : "Идеи"}</span><strong>{event.title}</strong>{(event.description || event.location) && <small>{[event.description, event.location].filter(Boolean).join(" · ")}</small>}</span>
                         {event.reminderAt && <span className="reminder-indicator" title="Есть напоминание"><Bell size={13} /></span>}
                         <span className="event-menu"><Ellipsis size={17} /></span>
                       </button>)}
@@ -836,11 +1102,98 @@ function App() {
             )}
 
             <div className="agenda-footer"><span><span className="footer-indicator" /> Всё на своих местах</span><span>Ваш календарь, ваш темп.</span></div>
-          </section>
+          </section>}
+
+          {activePage === "tasks" && <section className="page-scroll tasks-page">
+            <div className="page-intro"><span className="eyebrow-small">СПИСОК ДЕЛ</span><h2>Всё постепенно становится на свои места.</h2><p>Добавляйте задачи, отмечайте выполненное и возвращайтесь к важному в своём темпе.</p></div>
+            <div className="tasks-summary-row">
+              <div className="summary-stat"><span>Всего задач</span><strong>{tasks.length}</strong></div>
+              <div className="summary-stat"><span>Выполнено</span><strong>{completedCount}</strong></div>
+              <div className="summary-stat"><span>Осталось</span><strong>{tasks.length - completedCount}</strong></div>
+            </div>
+            <form className="task-page-add" onSubmit={addTask}><Plus size={18} /><input id="tasks-page-input" value={taskInput} onChange={(e) => setTaskInput(e.target.value)} placeholder="Что нужно сделать?" maxLength={160} /><button className="primary-button" type="submit" disabled={!taskInput.trim()}>Добавить задачу <ChevronRight size={15} /></button></form>
+            <div className="page-section-heading"><div><h3>Текущие задачи</h3><p>{tasks.length - completedCount} ещё ждут внимания</p></div><span className="page-count">{tasks.length}</span></div>
+            <div className="full-task-list">
+              {tasks.filter((task) => !task.completed).map((task) => <div className="full-task-row" key={task.id}>
+                <button className={"task-check task-check-" + task.color + (task.completed ? " checked" : "")} onClick={() => void toggleTask(task)} aria-label="Отметить выполненной">{task.completed && <Check size={12} />}</button>
+                <div className="full-task-copy"><strong>{task.title}</strong><small>{task.dueAt ? "Срок: " + format(new Date(task.dueAt), "d MMM yyyy, HH:mm", { locale: ru }) : "Без установленного срока"}</small></div>
+                <button className="task-delete visible-task-delete" onClick={() => void deleteTask(task)} aria-label="Удалить задачу"><Trash2 size={15} /></button>
+              </div>)}
+              {tasks.every((task) => task.completed) && <div className="page-empty-state"><span className="empty-state-icon"><CheckCheck size={23} /></span><strong>Все текущие задачи выполнены</strong><p>Отличная работа. Можно добавить новое дело или отдохнуть.</p></div>}
+            </div>
+            {completedCount > 0 && <><div className="page-section-heading completed-heading"><div><h3>Выполнено</h3><p>Сделанное тоже заслуживает внимания</p></div><span className="page-count">{completedCount}</span></div><div className="full-task-list">{tasks.filter((task) => task.completed).map((task) => <div className="full-task-row done-task" key={task.id}><button className={"task-check task-check-" + task.color + " checked"} onClick={() => void toggleTask(task)} aria-label="Вернуть в текущие задачи"><Check size={12} /></button><div className="full-task-copy"><strong>{task.title}</strong><small>Выполнено</small></div><button className="task-delete visible-task-delete" onClick={() => void deleteTask(task)} aria-label="Удалить задачу"><Trash2 size={15} /></button></div>)}</div></>}
+          </section>}
+
+          {activePage === "profile" && <section className="page-scroll profile-page">
+            <div className="page-intro"><span className="eyebrow-small">ЛИЧНОЕ ПРОСТРАНСТВО</span><h2>Ваш профиль, ваши правила.</h2><p>Настройте данные, которые помогают вам и вашим планам оставаться в порядке. Почта используется для входа и пока не редактируется здесь.</p></div>
+            <div className="profile-layout">
+              <div className="profile-identity-card">
+                <div className="profile-avatar-large">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="Аватар профиля" referrerPolicy="no-referrer" /> : <span>{(profile.displayName || session?.user.email || "C").slice(0,1).toUpperCase()}</span>}</div>
+                <h3>{profile.displayName || "Ваше имя"}</h3><p>{session?.user.email || "Демо-профиль"}</p>
+                <span className="profile-provider"><ShieldCheck size={14} /> {session?.user.app_metadata?.provider === "google" ? "Вход через Google" : session ? "Аккаунт по электронной почте" : "Локальный профиль"}</span>
+                <div className="profile-identity-divider" />
+                <div className="profile-security-note"><LockKeyhole size={16} /><span>Личная информация видна только в вашем аккаунте.</span></div>
+              </div>
+              <form className="profile-edit-card" onSubmit={saveProfile}>
+                <div className="panel-section-title"><div><h3>Личные данные</h3><p>Вы можете изменить их в любое время.</p></div><Pencil size={16} /></div>
+                <label className="field-label">Имя и фамилия<input className="plain-input" value={profile.displayName} onChange={(e) => setProfile((current) => ({ ...current, displayName: e.target.value }))} maxLength={100} placeholder="Как к вам обращаться" /></label>
+                <label className="field-label">Электронная почта<span className="profile-email-field"><AtSign size={16} /><input value={session?.user.email || "Демо-режим"} readOnly aria-readonly="true" /></span></label>
+                <div className="form-two-cols"><label className="field-label">Телефон<span className="input-with-icon"><Phone size={16} /><input className="plain-input" value={profile.phone} onChange={(e) => setProfile((current) => ({ ...current, phone: e.target.value }))} maxLength={40} placeholder="+..." /></span></label><label className="field-label">Дата рождения<span className="input-with-icon"><Cake size={16} /><input className="plain-input" type="date" value={profile.birthday} onChange={(e) => setProfile((current) => ({ ...current, birthday: e.target.value }))} /></span></label></div>
+                <label className="field-label">О себе<textarea className="plain-input note-input" value={profile.bio} onChange={(e) => setProfile((current) => ({ ...current, bio: e.target.value }))} maxLength={1000} rows={4} placeholder="Пара слов о себе, ваших интересах или предпочтениях…" /></label>
+                <div className="profile-form-footer"><span>Последние изменения сохраняются в облаке.</span><button className="primary-button" type="submit" disabled={profileBusy}>{profileBusy ? <span className="spinner" /> : <Save size={15} />} Сохранить профиль</button></div>
+              </form>
+            </div>
+            <div className="account-details-card"><div className="account-detail-icon"><History size={18} /></div><div><strong>История и данные профиля</strong><p>Контакты и история встреч хранятся в отдельном разделе «Люди». История входов не раскрывается через профиль приложения; системные события аутентификации остаются в журнале Supabase.</p></div><button className="secondary-button" type="button" onClick={() => setActivePage("people")}>Открыть «Люди» <ChevronRight size={15} /></button></div>
+          </section>}
+
+          {activePage === "people" && <section className="page-scroll people-page">
+            <div className="page-intro"><span className="eyebrow-small">ВАЖНЫЕ СВЯЗИ</span><h2>Люди, встречи и воспоминания.</h2><p>Собирайте контактные данные, заметки о людях и историю встреч в личном пространстве. Эти записи не публикуются и не доступны другим аккаунтам.</p></div>
+            <div className="people-layout">
+              <div className="people-main-column">
+                <div className="page-section-heading"><div><h3>Мои люди</h3><p>Контакты и короткие заметки</p></div><span className="page-count">{people.length}</span></div>
+                <div className="people-grid">
+                  {people.map((person) => <article className="person-card" key={person.id}>
+                    <div className="person-card-top"><span className="person-avatar">{person.name.slice(0,1).toUpperCase()}</span><div className="person-main-info"><strong>{person.name}</strong><small>{person.relationship || "Контакт"}</small></div><button className="subtle-icon-button" aria-label="Редактировать контакт" onClick={() => { setEditingPerson(person); setPersonDraft({ name: person.name, relationship: person.relationship, email: person.email, phone: person.phone, notes: person.notes }); document.getElementById("person-name-input")?.focus(); }}><Pencil size={14} /></button></div>
+                    {person.notes && <p className="person-notes">{person.notes}</p>}
+                    {person.email && <div className="person-contact-line"><AtSign size={14} /><span>{person.email}</span></div>}
+                    {person.phone && <div className="person-contact-line"><Phone size={14} /><span>{person.phone}</span></div>}
+                    <div className="person-card-footer"><span>{visitHistory.filter((visit) => visit.personId === person.id).length} записей в истории</span><button className="text-action" onClick={() => { setVisitDraft((current) => ({ ...current, personId: person.id })); document.getElementById("visit-title-input")?.focus(); }}>Добавить встречу <Plus size={13} /></button><button className="person-delete" onClick={() => void deletePerson(person)} aria-label="Удалить контакт"><Trash2 size={14} /></button></div>
+                  </article>)}
+                  {!people.length && <div className="page-empty-state people-empty"><span className="empty-state-icon"><Users size={23} /></span><strong>Ваш список людей начнётся здесь</strong><p>Добавьте близких, коллег или людей, с которыми хотите сохранять историю встреч.</p></div>}
+                </div>
+              </div>
+              <div className="people-form-column">
+                <form className="people-form-card" onSubmit={savePerson}>
+                  <div className="panel-section-title"><div><h3>{editingPerson ? "Изменить контакт" : "Добавить человека"}</h3><p>Контактная информация</p></div><UserCircle size={17} /></div>
+                  <label className="field-label">Имя<input id="person-name-input" className="plain-input" value={personDraft.name} onChange={(e) => setPersonDraft((current) => ({ ...current, name: e.target.value }))} maxLength={100} required placeholder="Имя и фамилия" /></label>
+                  <label className="field-label">Кто этот человек?<input className="plain-input" value={personDraft.relationship} onChange={(e) => setPersonDraft((current) => ({ ...current, relationship: e.target.value }))} maxLength={100} placeholder="Друг, коллега, клиент…" /></label>
+                  <label className="field-label">Электронная почта<input className="plain-input" type="email" value={personDraft.email} onChange={(e) => setPersonDraft((current) => ({ ...current, email: e.target.value }))} maxLength={254} placeholder="name@example.com" /></label>
+                  <label className="field-label">Телефон<input className="plain-input" type="tel" value={personDraft.phone} onChange={(e) => setPersonDraft((current) => ({ ...current, phone: e.target.value }))} maxLength={40} placeholder="+..." /></label>
+                  <label className="field-label">Заметки<textarea className="plain-input note-input" value={personDraft.notes} onChange={(e) => setPersonDraft((current) => ({ ...current, notes: e.target.value }))} maxLength={1500} rows={3} placeholder="Что важно помнить о человеке…" /></label>
+                  <div className="profile-form-footer"><span>Только для вашего аккаунта</span><button className="primary-button" type="submit"><Save size={15} />{editingPerson ? "Сохранить" : "Добавить"}</button></div>
+                  {editingPerson && <button className="cancel-edit-link" type="button" onClick={() => { setEditingPerson(null); setPersonDraft({ name: "", relationship: "", email: "", phone: "", notes: "" }); }}>Отменить редактирование</button>}
+                </form>
+              </div>
+            </div>
+            <div className="visit-history-card">
+              <div className="page-section-heading"><div><h3>История встреч и посещений</h3><p>Сохраняйте, где были и с кем встречались.</p></div><span className="page-count">{visitHistory.length}</span></div>
+              <form className="visit-entry-form" onSubmit={saveVisit}>
+                <label className="field-label">Событие / место<input id="visit-title-input" className="plain-input" value={visitDraft.title} onChange={(e) => setVisitDraft((current) => ({ ...current, title: e.target.value }))} maxLength={160} required placeholder="Например, встреча в любимом кафе" /></label>
+                <label className="field-label">С кем<select className="plain-input" value={visitDraft.personId} onChange={(e) => setVisitDraft((current) => ({ ...current, personId: e.target.value }))}><option value="">Без привязки к контакту</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+                <label className="field-label">Дата и время<input className="plain-input" type="datetime-local" value={visitDraft.visitedAt} onChange={(e) => setVisitDraft((current) => ({ ...current, visitedAt: e.target.value }))} required /></label>
+                <label className="field-label">Заметка<textarea className="plain-input" value={visitDraft.notes} onChange={(e) => setVisitDraft((current) => ({ ...current, notes: e.target.value }))} maxLength={1500} rows={2} placeholder="Детали, которые хочется сохранить…" /></label>
+                <button className="primary-button" type="submit"><Plus size={15} /> Добавить запись</button>
+              </form>
+              <div className="visit-history-list">
+                {visitHistory.map((visit) => <div className="visit-history-row" key={visit.id}><span className="visit-history-date"><strong>{format(new Date(visit.visitedAt), "d", { locale: ru })}</strong><small>{format(new Date(visit.visitedAt), "MMM yyyy", { locale: ru })}</small></span><div className="visit-history-copy"><strong>{visit.title}</strong><small>{visit.personName || "Без контакта"} · {format(new Date(visit.visitedAt), "HH:mm")}</small>{visit.notes && <p>{visit.notes}</p>}</div><button className="person-delete" onClick={() => void deleteVisit(visit)} aria-label="Удалить запись истории"><Trash2 size={14} /></button></div>)}
+                {!visitHistory.length && <div className="visit-history-empty"><History size={20} /><span>Пока нет записей. Добавьте первую встречу или посещение выше.</span></div>}
+              </div>
+            </div>
+          </section>}
         </main>
 
-        <aside className="insights-panel">
-          <div className="insights-head"><div><span className="eyebrow-small">ВАШЕ ПРОСТРАНСТВО</span><h2>Панель дня<span className="brand-period">.</span></h2></div><button className="subtle-icon-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="Переключить тему">{theme === "light" ? <Moon size={16} /> : <Sun size={16} />}</button></div>
+        {showInsightsPanel && activePage === "calendar" && <aside className="insights-panel">
+          <div className="insights-head"><div><span className="eyebrow-small">ВАШЕ ПРОСТРАНСТВО</span><h2>Панель дня<span className="brand-period">.</span></h2></div></div>
           <div className="dotted-art" aria-hidden="true"><div className="art-sun" /><div className="art-arch" /><span className="art-label">MAKE<br />SPACE</span></div>
           <section className="focus-card">
             <div className="focus-card-top"><span className="focus-icon"><Focus size={17} /></span><span className="card-overline">МАЛЕНЬКИЙ ФОКУС</span><span className="focus-spark">✳</span></div>
@@ -862,21 +1215,21 @@ function App() {
           </section>
           <section className="up-next-card">
             <div className="panel-section-title"><div><h3>На горизонте</h3><p>Ближайшие встречи</p></div><Clock3 size={17} /></div>
-            {nextEvents.slice(0, 2).map((event) => <button key={event.id} className="horizon-event" onClick={() => openEditEvent(event)}><span className={"horizon-color color-" + event.color} /><span><strong>{event.title}</strong><small>{humanShortDate(new Date(event.startAt))} · {format(new Date(event.startAt), "HH:mm")}</small></span><ChevronRight size={15} /></button>)}
+            {nextEvents.slice(0, 5).map((event) => <button key={event.id} className="horizon-event" onClick={() => openEditEvent(event)}><span className={"horizon-color color-" + event.color} /><span><strong>{event.title}</strong><small>{humanShortDate(new Date(event.startAt))} · {event.allDay ? "Весь день" : format(new Date(event.startAt), "HH:mm")}{event.location ? " · " + event.location : ""}</small></span><ChevronRight size={15} /></button>)}
             {!nextEvents.length && <p className="empty-horizon">Пока ничего не запланировано.</p>}
           </section>
           <div className="notification-card">
             <span className="notification-card-icon"><Bell size={17} /></span><div><strong>{pushEnabled ? "Уведомления включены" : "Не пропускайте важное"}</strong><p>{pushEnabled ? "Это устройство подключено к напоминаниям." : "Напоминания помогут вовремя переключиться."}</p><button onClick={enablePush}>{pushEnabled ? "Проверить настройки" : "Включить уведомления"} <ChevronRight size={14} /></button></div>
           </div>
           <div className="security-note"><ShieldCheck size={14} /><span>{session ? "Облачная синхронизация включена" : "Демо: данные остаются на устройстве"}</span></div>
-        </aside>
+        </aside>}
       </div>
 
       <nav className="mobile-bottom-nav" aria-label="Основная навигация">
-        <button className="mobile-nav-active" onClick={() => { setView("week"); setFocusDate(startOfDay(new Date())); }}><CalendarRange size={19} /><span>Календарь</span></button>
-        <button onClick={() => setView("month")}><LayoutGrid size={19} /><span>Месяц</span></button>
-        <button onClick={() => document.getElementById("quick-task-input")?.focus()}><ListTodo size={19} /><span>Задачи</span></button>
-        <button onClick={() => setMobileMenuOpen(true)}><Menu size={19} /><span>Ещё</span></button>
+        <button className={activePage === "calendar" ? "mobile-nav-active" : ""} onClick={() => { setActivePage("calendar"); setView("week"); setFocusDate(startOfDay(new Date())); }}><CalendarRange size={19} /><span>Календарь</span></button>
+        <button className={activePage === "calendar" && view === "month" ? "mobile-nav-active" : ""} onClick={() => { setActivePage("calendar"); setView("month"); }}><LayoutGrid size={19} /><span>Месяц</span></button>
+        <button className={activePage === "tasks" ? "mobile-nav-active" : ""} onClick={() => setActivePage("tasks")}><ListTodo size={19} /><span>Задачи</span></button>
+        <button className={activePage === "profile" || activePage === "people" ? "mobile-nav-active" : ""} onClick={() => setMobileMenuOpen(true)}><Menu size={19} /><span>Ещё</span></button>
       </nav>
 
       {modalOpen && <EventModal event={editingEvent} date={focusDate} onClose={() => setModalOpen(false)} onSave={saveEvent} onDelete={deleteEvent} />}

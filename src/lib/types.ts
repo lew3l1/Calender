@@ -9,6 +9,9 @@ export type CalendarEvent = {
   color: string;
   reminderAt: string | null;
   reminderSentAt?: string | null;
+  location?: string;
+  allDay?: boolean;
+  photoPaths?: string[];
 };
 
 export type CalendarTask = {
