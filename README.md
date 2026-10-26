@@ -56,7 +56,9 @@ VITE_VAPID_PUBLIC_KEY=YOUR_PUBLIC_VAPID_KEY
    - VITE_SUPABASE_ANON_KEY
    - VITE_VAPID_PUBLIC_KEY (можно оставить пустым до настройки push)
 3. После пуша в main workflow соберёт и опубликует сайт. Для запуска workflow из другой ветки создайте PR в main.
-4. Добавьте опубликованный адрес в Supabase Auth Redirect URLs и OAuth redirect allow-list.
+4. В Settings → Secrets and variables → Actions → Variables добавьте repository variable DEPLOY_TO_GITHUB_PAGES со значением true. Без этой переменной workflow будет только собирать приложение, но не пытаться публиковать его.
+5. После включения Pages и добавления переменной запустите workflow вручную из Actions на ветке main либо отправьте следующий commit в main.
+6. Добавьте опубликованный адрес в Supabase Auth Redirect URLs и OAuth redirect allow-list.
 
 Если вы используете Cloudflare Pages/Netlify, настройте эквивалентные переменные сборки и заголовки безопасности. GitHub Pages не применяет файл _headers.
 
