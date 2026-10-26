@@ -389,8 +389,8 @@ function App() {
   const [forceRecovery, setForceRecovery] = useState(false);
   const [view, setView] = useState<CalendarView>("week");
   const [focusDate, setFocusDate] = useState(startOfDay(new Date()));
-  const [events, setEvents] = useState<CalendarEvent[]>(makeDemoEvents);
-  const [tasks, setTasks] = useState<CalendarTask[]>(makeDemoTasks);
+  const [events, setEvents] = useState<CalendarEvent[]>(() => supabaseConfigured ? [] : makeDemoEvents());
+  const [tasks, setTasks] = useState<CalendarTask[]>(() => supabaseConfigured ? [] : makeDemoTasks());
   const [loadingData, setLoadingData] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
