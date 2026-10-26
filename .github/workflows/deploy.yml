@@ -32,7 +32,7 @@ jobs:
         run: npm run build
         env:
           VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: \${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: \${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_VAPID_PUBLIC_KEY: \${{ secrets.VITE_VAPID_PUBLIC_KEY }}
       - name: Configure Pages
         if: github.ref == 'refs/heads/main' && vars.DEPLOY_TO_GITHUB_PAGES == 'true'

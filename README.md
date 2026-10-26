@@ -21,7 +21,7 @@
 1. Создайте проект Supabase и выполните весь SQL из supabase/schema.sql в SQL Editor.
 2. Скопируйте Project URL и publishable/anon key в .env.local:
    - VITE_SUPABASE_URL
-   - VITE_SUPABASE_ANON_KEY
+   - VITE_SUPABASE_PUBLISHABLE_KEY
 3. В Authentication → URL Configuration задайте Site URL и добавьте в Redirect URLs адрес локального приложения и адрес опубликованного сайта.
 4. В Authentication → Providers включите Google. Создайте OAuth Client в Google Cloud Console и добавьте Client ID/Secret в настройки Google-провайдера Supabase. Redirect URI берите из панели Supabase, а не придумывайте вручную.
 5. В Authentication → Email настройте подтверждение email. Для реального запуска настройте SMTP-провайдера, отправителя и шаблоны подтверждения/восстановления. Проверьте, что redirect URL для восстановления ведёт на URL приложения.
@@ -30,7 +30,7 @@
 ### Параметры
 
 VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
 VITE_VAPID_PUBLIC_KEY=YOUR_PUBLIC_VAPID_KEY
 
 Ключ publishable/anon разрешено встраивать в клиент **только вместе с корректными RLS-политиками**. Никогда не добавляйте service_role key, VAPID private key, SMTP-пароли или другие секреты в VITE_* переменные, фронтенд, git или логи.
@@ -53,7 +53,7 @@ VITE_VAPID_PUBLIC_KEY=YOUR_PUBLIC_VAPID_KEY
 1. В Settings → Pages выберите GitHub Actions как источник.
 2. В Settings → Secrets and variables → Actions добавьте:
    - VITE_SUPABASE_URL
-   - VITE_SUPABASE_ANON_KEY
+   - VITE_SUPABASE_PUBLISHABLE_KEY
    - VITE_VAPID_PUBLIC_KEY (можно оставить пустым до настройки push)
 3. На каждом PR и push в main workflow проверит TypeScript и соберёт приложение. Публикация выполняется отдельно, чтобы не падать до включения Pages.
 4. В Settings → Secrets and variables → Actions → Variables добавьте repository variable DEPLOY_TO_GITHUB_PAGES со значением true. Без этой переменной workflow будет только проверять сборку.
