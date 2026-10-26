@@ -3,6 +3,8 @@ name: Build and deploy Calender
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -24,7 +26,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
       - name: Install dependencies
         run: npm install
       - name: Build
@@ -41,6 +42,7 @@ jobs:
           path: dist
 
   deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: \${{ steps.deployment.outputs.page_url }}

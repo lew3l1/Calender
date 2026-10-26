@@ -237,7 +237,7 @@ function AuthScreen({
             )}
             {mode !== "forgot" && (
               <label className="field-label">{mode === "update" ? "Новый пароль" : "Пароль"}
-                <span className="input-shell"><LockKeyhole size={17} /><input autoComplete={mode === "signup" || mode === "update" ? "new-password" : "current-password"} type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Не менее 8 символов" minLength={8} required /><button className="input-icon-button" type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span>
+                <span className="input-shell"><LockKeyhole size={17} /><input autoComplete={mode === "signup" || mode === "update" ? "new-password" : "current-password"} type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={mode === "login" ? "Ваш пароль" : "Не менее 8 символов"} minLength={mode === "signup" || mode === "update" ? 8 : undefined} required /><button className="input-icon-button" type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span>
               </label>
             )}
             {(mode === "signup" || mode === "update") && (
@@ -260,7 +260,7 @@ function AuthScreen({
             {mode === "forgot" && <button className="text-action back-action" onClick={() => { setMode("login"); setMessage(""); setError(""); }}><ArrowLeft size={14} /> Вернуться ко входу</button>}
             {mode === "update" && !forceRecovery && <button className="text-action back-action" onClick={() => setMode("login")}><ArrowLeft size={14} /> Вернуться ко входу</button>}
           </div>
-          <p className="auth-legal">Продолжая, вы соглашаетесь с условиями использования и политикой конфиденциальности.</p>
+          <p className="auth-legal">Продолжая, вы подтверждаете, что ознакомились с <a href="./terms.html" target="_blank" rel="noreferrer">условиями использования</a> и <a href="./privacy.html" target="_blank" rel="noreferrer">политикой конфиденциальности</a>.</p>
         </div>
       </section>
     </div>
@@ -404,7 +404,7 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const demoMode = !supabaseConfigured;
 
-  const notify = useCallback((message: string, kind: ToastState["kind"] = "info") => {
+  const notify = useCallback((message: string, kind: "success" | "error" | "info" = "info") => {
     setToast({ message, kind });
     window.setTimeout(() => setToast(null), 4300);
   }, []);
@@ -438,25 +438,44 @@ function App() {
   useEffect(() => {
     if (!session?.user.id || !supabase) return;
     let active = true;
-    setLoadingData(true);
-    Promise.all([
-      supabase.from("events").select("id,title,description,start_at,end_at,color,reminder_at,reminder_sent_at").order("start_at", { ascending: true }).limit(500),
-      supabase.from("tasks").select("id,title,due_at,completed,color").order("created_at", { ascending: false }).limit(200),
-      supabase.from("push_subscriptions").select("endpoint").limit(10),
-    ]).then(([eventResult, taskResult, pushResult]) => {
-      if (!active) return;
-      if (eventResult.error) throw eventResult.error;
-      if (taskResult.error) throw taskResult.error;
-      setEvents((eventResult.data || []).map(rowToEvent));
-      setTasks((taskResult.data || []).map(rowToTask));
-      setPushEnabled(Boolean(pushResult.data?.length));
-    }).catch((error: any) => {
-      console.error("Calender data load failed:", error);
-      notify("Не удалось загрузить облачные данные. Проверьте схему БД и RLS.", "error");
-    }).finally(() => {
-      if (active) setLoadingData(false);
-    });
-    return () => { active = false; };
+    const loadCloudData = async () => {
+      setLoadingData(true);
+      try {
+        const [eventResult, taskResult, pushResult] = await Promise.all([
+          supabase.from("events").select("id,title,description,start_at,end_at,color,reminder_at,reminder_sent_at").order("start_at", { ascending: true }).limit(500),
+          supabase.from("tasks").select("id,title,due_at,completed,color").order("created_at", { ascending: false }).limit(200),
+          supabase.from("push_subscriptions").select("endpoint").limit(10),
+        ]);
+        if (!active) return;
+        if (eventResult.error) throw eventResult.error;
+        if (taskResult.error) throw taskResult.error;
+        setEvents((eventResult.data || []).map(rowToEvent));
+        setTasks((taskResult.data || []).map(rowToTask));
+        setPushEnabled(Boolean(pushResult.data?.length));
+      } catch (error: any) {
+        if (active) {
+          console.error("Calender data load failed:", error);
+          notify("Не удалось загрузить облачные данные. Проверьте схему БД и RLS.", "error");
+        }
+      } finally {
+        if (active) setLoadingData(false);
+      }
+    };
+    void loadCloudData();
+    // Refresh this user's own rows whenever another device changes the cloud calendar.
+    const channel = supabase
+      .channel("calender-data-" + session.user.id)
+      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => { void loadCloudData(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => { void loadCloudData(); })
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("Calender realtime channel status:", status);
+        }
+      });
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
   }, [session?.user.id, notify]);
 
   useEffect(() => {
@@ -536,7 +555,7 @@ function App() {
         throw new Error("Событие не сохранено. Проверьте подключение и RLS.");
       }
       const saved = rowToEvent(result.data);
-      setEvents((current) => existing ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
+      setEvents((current) => existing ? current.map((item) => item.id === saved.id ? saved : item) : current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
     } else {
       setEvents((current) => existing ? current.map((item) => item.id === event.id ? event : item) : [...current, event]);
     }
@@ -567,7 +586,7 @@ function App() {
         notify("Не удалось создать задачу. Проверьте подключение.", "error");
         return;
       }
-      setTasks((current) => [rowToTask(data), ...current]);
+      setTasks((current) => current.some((item) => item.id === data.id) ? current.map((item) => item.id === data.id ? rowToTask(data) : item) : [rowToTask(data), ...current]);
     } else {
       setTasks((current) => [task, ...current]);
     }

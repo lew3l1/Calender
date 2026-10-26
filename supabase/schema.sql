@@ -116,3 +116,18 @@ create policy "Users can delete their own push subscriptions" on public.push_sub
 for delete to authenticated using ((select auth.uid()) = user_id);
 
 -- Do not enable anonymous table access. The service-role key belongs only in trusted server functions.
+
+
+-- Enable live cross-device refresh for calendar and task changes.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'events') then
+      execute 'alter publication supabase_realtime add table public.events';
+    end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'tasks') then
+      execute 'alter publication supabase_realtime add table public.tasks';
+    end if;
+  end if;
+end;
+$$;
