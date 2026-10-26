@@ -436,15 +436,16 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!session?.user.id || !supabase) return;
+    const client = supabase;
+    if (!session?.user.id || !client) return;
     let active = true;
     const loadCloudData = async () => {
       setLoadingData(true);
       try {
         const [eventResult, taskResult, pushResult] = await Promise.all([
-          supabase.from("events").select("id,title,description,start_at,end_at,color,reminder_at,reminder_sent_at").order("start_at", { ascending: true }).limit(500),
-          supabase.from("tasks").select("id,title,due_at,completed,color").order("created_at", { ascending: false }).limit(200),
-          supabase.from("push_subscriptions").select("endpoint").limit(10),
+          client.from("events").select("id,title,description,start_at,end_at,color,reminder_at,reminder_sent_at").order("start_at", { ascending: true }).limit(500),
+          client.from("tasks").select("id,title,due_at,completed,color").order("created_at", { ascending: false }).limit(200),
+          client.from("push_subscriptions").select("endpoint").limit(10),
         ]);
         if (!active) return;
         if (eventResult.error) throw eventResult.error;
@@ -463,7 +464,7 @@ function App() {
     };
     void loadCloudData();
     // Refresh this user's own rows whenever another device changes the cloud calendar.
-    const channel = supabase
+    const channel = client
       .channel("calender-data-" + session.user.id)
       .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => { void loadCloudData(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => { void loadCloudData(); })
@@ -474,7 +475,7 @@ function App() {
       });
     return () => {
       active = false;
-      void supabase.removeChannel(channel);
+      void client.removeChannel(channel);
     };
   }, [session?.user.id, notify]);
 
