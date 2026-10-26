@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "Calender — календарь и задачи",
+  "short_name": "Calender",
+  "description": "Встречи, планы и задачи в одном спокойном пространстве.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eeede4",
+  "theme_color": "#eeede4",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
