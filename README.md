@@ -55,8 +55,8 @@ VITE_VAPID_PUBLIC_KEY=YOUR_PUBLIC_VAPID_KEY
    - VITE_SUPABASE_URL
    - VITE_SUPABASE_ANON_KEY
    - VITE_VAPID_PUBLIC_KEY (можно оставить пустым до настройки push)
-3. После пуша в main workflow соберёт и опубликует сайт. Для запуска workflow из другой ветки создайте PR в main.
-4. В Settings → Secrets and variables → Actions → Variables добавьте repository variable DEPLOY_TO_GITHUB_PAGES со значением true. Без этой переменной workflow будет только собирать приложение, но не пытаться публиковать его.
+3. На каждом PR и push в main workflow проверит TypeScript и соберёт приложение. Публикация выполняется отдельно, чтобы не падать до включения Pages.
+4. В Settings → Secrets and variables → Actions → Variables добавьте repository variable DEPLOY_TO_GITHUB_PAGES со значением true. Без этой переменной workflow будет только проверять сборку.
 5. После включения Pages и добавления переменной запустите workflow вручную из Actions на ветке main либо отправьте следующий commit в main.
 6. Добавьте опубликованный адрес в Supabase Auth Redirect URLs и OAuth redirect allow-list.
 
